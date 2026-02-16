@@ -196,6 +196,25 @@ export class ZugferdReader implements INodeType {
 		outputs: ['main'],
 		properties: [
 			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				options: [
+					{
+						name: 'Extract',
+						value: 'extract',
+						description: 'Extract ZUGFeRD/Factur-X XML data from PDF',
+					},
+					{
+						name: 'Check',
+						value: 'check',
+						description: 'Check if PDF contains ZUGFeRD/Factur-X data',
+					},
+				],
+				default: 'extract',
+				description: 'Operation to perform',
+			},
+			{
 				displayName: 'Input Mode',
 				name: 'inputMode',
 				type: 'options',
@@ -263,6 +282,11 @@ export class ZugferdReader implements INodeType {
 				],
 				default: 'json',
 				description: 'Format of the output data',
+				displayOptions: {
+					show: {
+						operation: ['extract'],
+					},
+				},
 			},
 			{
 				displayName: 'XML Attachment Name',
@@ -304,9 +328,8 @@ export class ZugferdReader implements INodeType {
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
+				const operation = this.getNodeParameter('operation', itemIndex) as string;
 				const inputMode = this.getNodeParameter('inputMode', itemIndex) as string;
-				const outputFormat = this.getNodeParameter('outputFormat', itemIndex) as string;
-				const xmlAttachmentName = this.getNodeParameter('xmlAttachmentName', itemIndex) as string;
 
 				let pdfBytes: Uint8Array;
 
@@ -327,88 +350,141 @@ export class ZugferdReader implements INodeType {
 				// Get embedded files
 				const embeddedFiles = getEmbeddedFiles(pdfDoc);
 
-				if (embeddedFiles.length === 0) {
-					throw new NodeOperationError(
-						this.getNode(),
-						'No embedded files found in PDF',
-						{ itemIndex }
-					);
-				}
+				if (operation === 'check') {
+					// Check operation: return boolean
+					const xmlAttachmentName = this.getNodeParameter('xmlAttachmentName', itemIndex) as string;
+					let hasZugferdData = false;
+					let foundAttachmentName: string | null = null;
 
-				// Find ZUGFeRD/Factur-X XML
-				let xmlData: string | null = null;
-				let foundAttachmentName: string | null = null;
+					if (embeddedFiles.length > 0) {
+						if (xmlAttachmentName === 'auto') {
+							// Auto-detect common ZUGFeRD/Factur-X names
+							const commonNames = [
+								'factur-x.xml',
+								'FacturX.xml',
+								'zugferd-invoice.xml',
+								'ZUGFeRD-invoice.xml',
+								'xrechnung.xml',
+								'XRechnung.xml',
+							];
 
-				if (xmlAttachmentName === 'auto') {
-					// Auto-detect common ZUGFeRD/Factur-X names
-					const commonNames = [
-						'factur-x.xml',
-						'FacturX.xml',
-						'zugferd-invoice.xml',
-						'ZUGFeRD-invoice.xml',
-						'xrechnung.xml',
-						'XRechnung.xml',
-					];
-
-					for (const file of embeddedFiles) {
-						const fileName = file.name.toLowerCase();
-						if (
-							commonNames.some(name => fileName.includes(name.toLowerCase())) ||
-							fileName.endsWith('.xml')
-						) {
-							xmlData = file.data;
-							foundAttachmentName = file.name;
-							break;
+							for (const file of embeddedFiles) {
+								const fileName = file.name.toLowerCase();
+								if (
+									commonNames.some(name => fileName.includes(name.toLowerCase())) ||
+									fileName.endsWith('.xml')
+								) {
+									hasZugferdData = true;
+									foundAttachmentName = file.name;
+									break;
+								}
+							}
+						} else {
+							const customName = this.getNodeParameter('customAttachmentName', itemIndex) as string;
+							const file = embeddedFiles.find((f: EmbeddedFile) => f.name === customName);
+							if (file) {
+								hasZugferdData = true;
+								foundAttachmentName = file.name;
+							}
 						}
 					}
-				} else {
-					const customName = this.getNodeParameter('customAttachmentName', itemIndex) as string;
-					const file = embeddedFiles.find((f: EmbeddedFile) => f.name === customName);
-					if (file) {
-						xmlData = file.data;
-						foundAttachmentName = file.name;
-					}
-				}
 
-				if (!xmlData) {
-					throw new NodeOperationError(
-						this.getNode(),
-						`No ZUGFeRD/Factur-X XML found. Available attachments: ${embeddedFiles.map((f: EmbeddedFile) => f.name).join(', ')}`,
-						{ itemIndex }
-					);
-				}
-
-				// Prepare output based on format
-				let json: any = {};
-
-				if (outputFormat === 'json' || outputFormat === 'both') {
-					const parser = new XMLParser({
-						ignoreAttributes: false,
-						attributeNamePrefix: '@_',
-						textNodeName: '#text',
-						parseAttributeValue: true,
-						parseTagValue: true,
+					returnData.push({
+						json: {
+							hasZugferdData,
+							attachmentName: foundAttachmentName,
+							availableAttachments: embeddedFiles.map((f: EmbeddedFile) => f.name),
+						},
 					});
-					json = parser.parse(xmlData);
-				}
 
-				const outputData: any = {
-					attachmentName: foundAttachmentName,
-					availableAttachments: embeddedFiles.map((f: EmbeddedFile) => f.name),
-				};
-
-				if (outputFormat === 'json') {
-					outputData.invoice = json;
-				} else if (outputFormat === 'xml') {
-					outputData.xml = xmlData;
 				} else {
-					outputData.invoice = json;
-					outputData.xml = xmlData;
-				}
+					// Extract operation: extract and parse XML
+					const outputFormat = this.getNodeParameter('outputFormat', itemIndex) as string;
+					const xmlAttachmentName = this.getNodeParameter('xmlAttachmentName', itemIndex) as string;
 
-				returnData.push({
-					json: outputData,
-				});
+					if (embeddedFiles.length === 0) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'No embedded files found in PDF',
+							{ itemIndex }
+						);
+					}
+
+					// Find ZUGFeRD/Factur-X XML
+					let xmlData: string | null = null;
+					let foundAttachmentName: string | null = null;
+
+					if (xmlAttachmentName === 'auto') {
+						// Auto-detect common ZUGFeRD/Factur-X names
+						const commonNames = [
+							'factur-x.xml',
+							'FacturX.xml',
+							'zugferd-invoice.xml',
+							'ZUGFeRD-invoice.xml',
+							'xrechnung.xml',
+							'XRechnung.xml',
+						];
+
+						for (const file of embeddedFiles) {
+							const fileName = file.name.toLowerCase();
+							if (
+								commonNames.some(name => fileName.includes(name.toLowerCase())) ||
+								fileName.endsWith('.xml')
+							) {
+								xmlData = file.data;
+								foundAttachmentName = file.name;
+								break;
+							}
+						}
+					} else {
+						const customName = this.getNodeParameter('customAttachmentName', itemIndex) as string;
+						const file = embeddedFiles.find((f: EmbeddedFile) => f.name === customName);
+						if (file) {
+							xmlData = file.data;
+							foundAttachmentName = file.name;
+						}
+					}
+
+					if (!xmlData) {
+						throw new NodeOperationError(
+							this.getNode(),
+							`No ZUGFeRD/Factur-X XML found. Available attachments: ${embeddedFiles.map((f: EmbeddedFile) => f.name).join(', ')}`,
+							{ itemIndex }
+						);
+					}
+
+					// Prepare output based on format
+					let json: any = {};
+
+					if (outputFormat === 'json' || outputFormat === 'both') {
+						const parser = new XMLParser({
+							ignoreAttributes: false,
+							attributeNamePrefix: '@_',
+							textNodeName: '#text',
+							parseAttributeValue: true,
+							parseTagValue: true,
+						});
+						json = parser.parse(xmlData);
+					}
+
+					const outputData: any = {
+						attachmentName: foundAttachmentName,
+						availableAttachments: embeddedFiles.map((f: EmbeddedFile) => f.name),
+					};
+
+					if (outputFormat === 'json') {
+						outputData.invoice = json;
+					} else if (outputFormat === 'xml') {
+						outputData.xml = xmlData;
+					} else {
+						outputData.invoice = json;
+						outputData.xml = xmlData;
+					}
+
+					returnData.push({
+						json: outputData,
+					});
+				}
 
 			} catch (error) {
 				if (this.continueOnFail()) {

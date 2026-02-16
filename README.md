@@ -4,6 +4,7 @@ Ein N8N Custom Node zum Extrahieren von ZUGFeRD/Factur-X XML-Daten aus PDF-Rechn
 
 ## Features
 
+- ✅ Prüft ob PDF ZUGFeRD/Factur-X Daten enthält
 - ✅ Extrahiert ZUGFeRD und Factur-X XML aus PDF-Dateien
 - ✅ Automatische Erkennung der XML-Anhänge
 - ✅ Unterstützt Binary Data und Dateipfad als Input
@@ -40,6 +41,18 @@ Ein N8N Custom Node zum Extrahieren von ZUGFeRD/Factur-X XML-Daten aus PDF-Rechn
 
 ## Verwendung
 
+### Operationen
+
+**Check:**
+- Prüft ob die PDF ZUGFeRD/Factur-X Daten enthält
+- Gibt einen Boolean `hasZugferdData` zurück
+- Schnelle Validierung ohne das XML zu extrahieren/parsen
+- Nützlich für Filterung und Routing in Workflows
+
+**Extract (Standard):**
+- Extrahiert und parst die ZUGFeRD/Factur-X XML-Daten
+- Gibt die vollständigen Rechnungsdaten zurück
+
 ### Input Modes
 
 **Binary Data (Standard):**
@@ -63,16 +76,37 @@ Ein N8N Custom Node zum Extrahieren von ZUGFeRD/Factur-X XML-Daten aus PDF-Rechn
 **Both:**
 - Gibt sowohl JSON als auch XML zurück
 
-### Beispiel Workflow
+### Beispiel Workflows
 
+**Workflow 1: Check und dann Extract**
+```
+┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐    ┌─────────────┐
+│  HTTP Request   │───▶│  ZUGFeRD Reader  │───▶│  IF Node         │───▶│  ZUGFeRD    │
+│  (Get PDF)      │    │  (Check)         │    │  (hasZugferdData)│    │  Reader     │
+└─────────────────┘    └──────────────────┘    └──────────────────┘    │  (Extract)  │
+                                                                         └─────────────┘
+```
+
+**Workflow 2: Direkt Extract**
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────┐
 │  HTTP Request   │───▶│  ZUGFeRD Reader  │───▶│  Process    │
-│  (Get PDF)      │    │                  │    │  Invoice    │
+│  (Get PDF)      │    │  (Extract)       │    │  Invoice    │
 └─────────────────┘    └──────────────────┘    └─────────────┘
 ```
 
-### Beispiel Output
+### Beispiel Outputs
+
+**Check Operation:**
+```json
+{
+  "hasZugferdData": true,
+  "attachmentName": "factur-x.xml",
+  "availableAttachments": ["factur-x.xml"]
+}
+```
+
+**Extract Operation:**
 
 ```json
 {
