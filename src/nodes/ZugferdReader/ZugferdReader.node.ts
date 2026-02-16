@@ -9,6 +9,81 @@ import {
 import { PDFDocument } from 'pdf-lib';
 import { XMLParser } from 'fast-xml-parser';
 
+interface EmbeddedFile {
+	name: string;
+	data: string;
+}
+
+function extractNamesArray(obj: any): any[] {
+	if (obj.lookup) {
+		const kids = obj.lookup('Kids');
+		if (kids && Array.isArray(kids)) {
+			let result: any[] = [];
+			for (const kid of kids) {
+				result = result.concat(extractNamesArray(kid));
+			}
+			return result;
+		}
+
+		const names = obj.lookup('Names');
+		if (names && Array.isArray(names)) {
+			return names;
+		}
+	}
+
+	return [];
+}
+
+function getEmbeddedFiles(pdfDoc: PDFDocument): EmbeddedFile[] {
+	const embeddedFiles: EmbeddedFile[] = [];
+
+	try {
+		const context = pdfDoc.context;
+		const catalog = context.lookup(context.trailerInfo.Root) as any;
+
+		if (!catalog || !catalog.get) {
+			return embeddedFiles;
+		}
+
+		const names = catalog.lookup('Names');
+		if (!names) {
+			return embeddedFiles;
+		}
+
+		const embeddedFilesRef = names.lookup('EmbeddedFiles');
+		if (!embeddedFilesRef) {
+			return embeddedFiles;
+		}
+
+		const namesArray = extractNamesArray(embeddedFilesRef);
+
+		for (let i = 0; i < namesArray.length; i += 2) {
+			const fileName = namesArray[i];
+			const fileSpec = namesArray[i + 1];
+
+			if (fileSpec && fileSpec.lookup) {
+				const efDict = fileSpec.lookup('EF');
+				if (efDict && efDict.lookup) {
+					const fileStream = efDict.lookup('F');
+					if (fileStream && fileStream.contents) {
+						const contents = fileStream.contents;
+						const decoder = new TextDecoder('utf-8');
+						const text = decoder.decode(contents);
+						embeddedFiles.push({
+							name: fileName,
+							data: text,
+						});
+					}
+				}
+			}
+		}
+	} catch (error) {
+		// If extraction fails, return empty array
+	}
+
+	return embeddedFiles;
+}
+
 export class ZugferdReader implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'ZUGFeRD Reader',
@@ -153,7 +228,7 @@ export class ZugferdReader implements INodeType {
 				const pdfDoc = await PDFDocument.load(pdfBytes);
 
 				// Get embedded files
-				const embeddedFiles = this.getEmbeddedFiles(pdfDoc);
+				const embeddedFiles = getEmbeddedFiles(pdfDoc);
 
 				if (embeddedFiles.length === 0) {
 					throw new NodeOperationError(
@@ -191,7 +266,7 @@ export class ZugferdReader implements INodeType {
 					}
 				} else {
 					const customName = this.getNodeParameter('customAttachmentName', itemIndex) as string;
-					const file = embeddedFiles.find(f => f.name === customName);
+					const file = embeddedFiles.find((f: EmbeddedFile) => f.name === customName);
 					if (file) {
 						xmlData = file.data;
 						foundAttachmentName = file.name;
@@ -201,7 +276,7 @@ export class ZugferdReader implements INodeType {
 				if (!xmlData) {
 					throw new NodeOperationError(
 						this.getNode(),
-						`No ZUGFeRD/Factur-X XML found. Available attachments: ${embeddedFiles.map(f => f.name).join(', ')}`,
+						`No ZUGFeRD/Factur-X XML found. Available attachments: ${embeddedFiles.map((f: EmbeddedFile) => f.name).join(', ')}`,
 						{ itemIndex }
 					);
 				}
@@ -222,7 +297,7 @@ export class ZugferdReader implements INodeType {
 
 				const outputData: any = {
 					attachmentName: foundAttachmentName,
-					availableAttachments: embeddedFiles.map(f => f.name),
+					availableAttachments: embeddedFiles.map((f: EmbeddedFile) => f.name),
 				};
 
 				if (outputFormat === 'json') {
@@ -242,7 +317,7 @@ export class ZugferdReader implements INodeType {
 				if (this.continueOnFail()) {
 					returnData.push({
 						json: {
-							error: error.message,
+							error: error instanceof Error ? error.message : String(error),
 						},
 					});
 					continue;
@@ -252,75 +327,5 @@ export class ZugferdReader implements INodeType {
 		}
 
 		return [returnData];
-	}
-
-	private getEmbeddedFiles(pdfDoc: PDFDocument): Array<{ name: string; data: string }> {
-		const embeddedFiles: Array<{ name: string; data: string }> = [];
-
-		try {
-			const context = pdfDoc.context;
-			const catalog = context.lookup(context.trailerInfo.Root) as any;
-
-			if (!catalog || !catalog.get) {
-				return embeddedFiles;
-			}
-
-			const names = catalog.lookup('Names');
-			if (!names) {
-				return embeddedFiles;
-			}
-
-			const embeddedFilesRef = names.lookup('EmbeddedFiles');
-			if (!embeddedFilesRef) {
-				return embeddedFiles;
-			}
-
-			const namesArray = this.extractNamesArray(embeddedFilesRef);
-
-			for (let i = 0; i < namesArray.length; i += 2) {
-				const fileName = namesArray[i];
-				const fileSpec = namesArray[i + 1];
-
-				if (fileSpec && fileSpec.lookup) {
-					const efDict = fileSpec.lookup('EF');
-					if (efDict && efDict.lookup) {
-						const fileStream = efDict.lookup('F');
-						if (fileStream && fileStream.contents) {
-							const contents = fileStream.contents;
-							const decoder = new TextDecoder('utf-8');
-							const text = decoder.decode(contents);
-							embeddedFiles.push({
-								name: fileName,
-								data: text,
-							});
-						}
-					}
-				}
-			}
-		} catch (error) {
-			// If extraction fails, return empty array
-		}
-
-		return embeddedFiles;
-	}
-
-	private extractNamesArray(obj: any): any[] {
-		if (obj.lookup) {
-			const kids = obj.lookup('Kids');
-			if (kids && Array.isArray(kids)) {
-				let result: any[] = [];
-				for (const kid of kids) {
-					result = result.concat(this.extractNamesArray(kid));
-				}
-				return result;
-			}
-
-			const names = obj.lookup('Names');
-			if (names && Array.isArray(names)) {
-				return names;
-			}
-		}
-
-		return [];
 	}
 }
