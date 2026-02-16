@@ -8,6 +8,7 @@ import {
 
 import { PDFDocument } from 'pdf-lib';
 import { XMLParser } from 'fast-xml-parser';
+import { inflateSync } from 'zlib';
 
 interface EmbeddedFile {
 	name: string;
@@ -38,41 +39,56 @@ function getEmbeddedFiles(pdfDoc: PDFDocument): EmbeddedFile[] {
 	const embeddedFiles: EmbeddedFile[] = [];
 
 	try {
-		const context = pdfDoc.context;
+		const context = pdfDoc.context as any;
 		const catalog = context.lookup(context.trailerInfo.Root) as any;
 
-		if (!catalog || !catalog.get) {
+		if (!catalog || !catalog.dict) {
 			return embeddedFiles;
 		}
 
+		// Method 1: Try /AF (Associated Files) - used by many modern ZUGFeRD PDFs
+		for (const [key, value] of (catalog.dict.entries() as any)) {
+			const keyStr = key.toString();
+
+			if (keyStr === '/AF' && value.array) {
+				for (const fileSpecRef of value.array) {
+					const fileSpec = context.lookup(fileSpecRef);
+
+					if (fileSpec && fileSpec.dict) {
+						const fileData = extractFileFromSpec(context, fileSpec);
+						if (fileData) {
+							embeddedFiles.push(fileData);
+						}
+					}
+				}
+			}
+		}
+
+		// Method 2: Try /Names/EmbeddedFiles - traditional method
 		const names = catalog.lookup('Names');
-		if (!names) {
-			return embeddedFiles;
-		}
+		if (names) {
+			const embeddedFilesRef = names.lookup('EmbeddedFiles');
+			if (embeddedFilesRef) {
+				const namesArray = extractNamesArray(embeddedFilesRef);
 
-		const embeddedFilesRef = names.lookup('EmbeddedFiles');
-		if (!embeddedFilesRef) {
-			return embeddedFiles;
-		}
+				for (let i = 0; i < namesArray.length; i += 2) {
+					const fileName = namesArray[i];
+					const fileSpec = namesArray[i + 1];
 
-		const namesArray = extractNamesArray(embeddedFilesRef);
-
-		for (let i = 0; i < namesArray.length; i += 2) {
-			const fileName = namesArray[i];
-			const fileSpec = namesArray[i + 1];
-
-			if (fileSpec && fileSpec.lookup) {
-				const efDict = fileSpec.lookup('EF');
-				if (efDict && efDict.lookup) {
-					const fileStream = efDict.lookup('F');
-					if (fileStream && fileStream.contents) {
-						const contents = fileStream.contents;
-						const decoder = new TextDecoder('utf-8');
-						const text = decoder.decode(contents);
-						embeddedFiles.push({
-							name: fileName,
-							data: text,
-						});
+					if (fileSpec && fileSpec.lookup) {
+						const efDict = fileSpec.lookup('EF');
+						if (efDict && efDict.lookup) {
+							const fileStream = efDict.lookup('F');
+							if (fileStream) {
+								const contents = extractAndDecodeStream(context, fileStream);
+								if (contents) {
+									embeddedFiles.push({
+										name: fileName,
+										data: contents,
+									});
+								}
+							}
+						}
 					}
 				}
 			}
@@ -82,6 +98,87 @@ function getEmbeddedFiles(pdfDoc: PDFDocument): EmbeddedFile[] {
 	}
 
 	return embeddedFiles;
+}
+
+function extractFileFromSpec(context: any, fileSpec: any): EmbeddedFile | null {
+	try {
+		// Get filename and EF dict from fileSpec
+		let fileName = 'unknown';
+		let efDictRef = null;
+
+		for (const [key, value] of fileSpec.dict.entries()) {
+			const keyStr = key.toString();
+
+			if (keyStr === '/F' || keyStr === '/UF') {
+				fileName = value.value || value.toString();
+			}
+
+			if (keyStr === '/EF') {
+				efDictRef = value;
+			}
+		}
+
+		// Get embedded file stream from EF dict
+		if (efDictRef) {
+			const efDict = efDictRef.constructor?.name === 'PDFRef' ? context.lookup(efDictRef) : efDictRef;
+
+			if (efDict && efDict.dict) {
+				for (const [key, value] of efDict.dict.entries()) {
+					if (key.toString() === '/F') {
+						const stream = context.lookup(value);
+						if (stream) {
+							const contents = extractAndDecodeStream(context, stream);
+							if (contents) {
+								return {
+									name: fileName,
+									data: contents,
+								};
+							}
+						}
+					}
+				}
+			}
+		}
+	} catch (error) {
+		// Ignore errors for individual files
+	}
+
+	return null;
+}
+
+function extractAndDecodeStream(context: any, stream: any): string | null {
+	try {
+		if (!stream.contents) {
+			return null;
+		}
+
+		let contents = stream.contents;
+
+		// Check for compression filters
+		if (stream.dict) {
+			for (const [key, value] of stream.dict.entries()) {
+				if (key.toString() === '/Filter') {
+					const filterStr = value.toString();
+
+					// Handle FlateDecode compression
+					if (filterStr.includes('FlateDecode')) {
+						try {
+							contents = inflateSync(Buffer.from(contents));
+						} catch (error) {
+							// If decompression fails, try using raw contents
+							return null;
+						}
+					}
+				}
+			}
+		}
+
+		// Decode as UTF-8
+		const decoder = new TextDecoder('utf-8');
+		return decoder.decode(contents);
+	} catch (error) {
+		return null;
+	}
 }
 
 export class ZugferdReader implements INodeType {
