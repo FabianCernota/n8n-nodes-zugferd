@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-zugferd-reader",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "N8N node to extract ZUGFeRD/Factur-X XML from PDF invoices",
   "main": "dist/index.js",
   "scripts": {
@@ -19,7 +19,9 @@
     "factur-x",
     "invoice",
     "pdf",
-    "xml"
+    "xml",
+    "electronic-invoice",
+    "e-rechnung"
   ],
   "n8n": {
     "n8nNodesApiVersion": 1,
@@ -27,8 +29,16 @@
       "dist/nodes/ZugferdReader/ZugferdReader.node.js"
     ]
   },
-  "author": "",
+  "author": "Fabian Cernota",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FabianCernota/n8n-nodes-zugferd.git"
+  },
+  "homepage": "https://github.com/FabianCernota/n8n-nodes-zugferd#readme",
+  "bugs": {
+    "url": "https://github.com/FabianCernota/n8n-nodes-zugferd/issues"
+  },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "n8n-workflow": "^1.68.0",
