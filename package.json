@@ -1,0 +1,36 @@
+{
+  "name": "n8n-nodes-zugferd-reader",
+  "version": "1.0.0",
+  "description": "N8N node to extract ZUGFeRD/Factur-X XML from PDF invoices",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "zugferd",
+    "factur-x",
+    "invoice",
+    "pdf",
+    "xml"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "nodes": [
+      "dist/nodes/ZugferdReader/ZugferdReader.node.js"
+    ]
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "n8n-workflow": "^1.0.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "fast-xml-parser": "^4.3.4"
+  }
+}
