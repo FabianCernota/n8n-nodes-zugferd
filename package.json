@@ -1,12 +1,17 @@
 {
   "name": "n8n-nodes-zugferd-reader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "N8N node to extract ZUGFeRD/Factur-X XML from PDF invoices",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch"
   },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
   "keywords": [
     "n8n-community-node-package",
     "n8n",
